@@ -7,11 +7,39 @@ app.use(express.json());
 dotenv.config();
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY;
 
+const getBlankResponse = () => ({
+    "Name": "",
+    "phoneNumber": "",
+    "email": "",
+    "address": "",
+    "github": "",
+    "linkedin": "",
+    "skills": [],
+    "education": [
+        {
+            "degree": "",
+            "institution": "",
+            "year": "",
+            "percentage": ""
+        }
+    ],
+    "experience": [
+        {
+            "company": "",
+            "designation": "",
+            "duration": "",
+            "location": ""
+        }
+    ],
+    "certifications": []
+});
+
+
 async function parseResume(resumeText) {
     if (!MISTRAL_API_KEY || MISTRAL_API_KEY === "YOUR_STATIC_MISTRAL_API_KEY_HERE") {
         throw new Error("Mistral API key is not configured in the code.");
     }
-    
+
     if (!resumeText || !resumeText.trim()) {
         throw new Error("Resume text is empty or not provided.");
     }
@@ -39,34 +67,7 @@ async function parseResume(resumeText) {
     - experience (as a list of objects, each with company, designation, duration, and location)
     - certifications (as a list of strings)
 
-    The output MUST be a valid JSON object with the following structure. If a field is not present in the resume, the corresponding value should be an empty string "" for single fields, or an empty list [] for lists. Do not invent any information.
-
-    {
-      "Name": "",
-      "phoneNumber": "",
-      "email": "",
-      "address": "",
-      "github": "",
-      "linkedin": "",
-      "skills": [],
-      "education": [
-        {
-          "degree": "",
-          "institution": "",
-          "year": "",
-          "percentage": ""
-        }
-      ],
-      "experience": [
-        {
-          "company": "",
-          "designation": "",
-          "duration": "",
-          "location": ""
-        }
-      ],
-      "certifications": []
-    }
+    The output MUST be a valid JSON object. If a field is not present in the resume, the corresponding value should be an empty string "" for single fields, or an empty list [] for lists. Do not invent any information.
 
     --- RESUME TEXT ---
     ${resumeText}
@@ -84,8 +85,38 @@ async function parseResume(resumeText) {
     try {
         const response = await axios.post(apiUrl, payload, { headers, timeout: 120000 });
         const parsedContentStr = response.data.choices[0].message.content;
-        return JSON.parse(parsedContentStr);
+        
+        let parsedData = JSON.parse(parsedContentStr);
+
+        if (Array.isArray(parsedData.education) && parsedData.education.length === 0) {
+            parsedData.education = [
+                {
+                    "degree": "",
+                    "institution": "",
+                    "year": "",
+                    "percentage": ""
+                }
+            ];
+        }
+
+        if (Array.isArray(parsedData.experience) && parsedData.experience.length === 0) {
+            parsedData.experience = [
+                {
+                    "company": "",
+                    "designation": "",
+                    "duration": "",
+                    "location": ""
+                }
+            ];
+        }
+
+        return parsedData;
+
     } catch (apiError) {
+        if (apiError instanceof SyntaxError) {
+            console.error("Failed to parse JSON from Mistral API:", apiError.message);
+            throw new Error("API returned invalid JSON.");
+        }
         console.error("Error details from Mistral API:", apiError.response ? apiError.response.data : apiError.message);
         throw new Error(`API call failed: ${apiError.message}`);
     }
@@ -94,15 +125,17 @@ async function parseResume(resumeText) {
 app.post('/parse-resume', async (req, res) => {
     const { resume_text } = req.body;
 
-    if (!resume_text) {
-        return res.status(400).json({ error: "Request body must contain 'resume_text' field." });
+    if (!resume_text || !resume_text.trim()) {
+        return res.status(200).json(getBlankResponse());
     }
 
     try {
         const parsedData = await parseResume(resume_text);
         res.status(200).json(parsedData);
     } catch (error) {
-        res.status(500).json({ error: error.message });
+        
+        console.error("An error occurred during resume parsing:", error.message);
+        res.status(200).json(getBlankResponse());
     }
 });
 
